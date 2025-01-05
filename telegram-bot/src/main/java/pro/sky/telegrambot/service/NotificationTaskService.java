@@ -1,12 +1,14 @@
 package pro.sky.telegrambot.service;
 
+import com.pengrad.telegrambot.TelegramBot;
+import com.pengrad.telegrambot.request.SendMessage;
+import com.pengrad.telegrambot.response.SendResponse;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
 import pro.sky.telegrambot.entity.NotificationTask;
 import pro.sky.telegrambot.repository.NotificationTaskRepository;
 
@@ -22,23 +24,21 @@ public class NotificationTaskService {
 
     private Logger logger = LoggerFactory.getLogger(NotificationTaskService.class);
 
-    @Value("${telegram.bot.token}")
-    private String token;
+    @Autowired
+    private TelegramBot telegramBot;
 
-    private final RestTemplate restTemplate;
     private final NotificationTaskRepository repository;
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm");
     private static final Pattern MESSAGE_PATTERN = Pattern.compile("(\\d{2}\\.\\d{2}\\.\\d{4}\\s\\d{2}:\\d{2})(\\s+)(.+)");
 
-    public NotificationTaskService(RestTemplate restTemplate, NotificationTaskRepository repository) {
-        this.restTemplate = restTemplate;
+    public NotificationTaskService(NotificationTaskRepository repository, TelegramBot telegramBot) {
         this.repository = repository;
-
+        this.telegramBot = telegramBot;
     }
 
     @PostConstruct
     public void validateToken() {
-        if (token == null || token.isEmpty()) {
+        if (telegramBot == null) {
             throw new IllegalStateException("Токен Telegram Bot не настроен. Проверьте конфигурацию!");
         }
     }
@@ -93,26 +93,29 @@ public class NotificationTaskService {
         }
     }
 
-    private String getTelegramApiUrl() {
-        if (token == null || token.isEmpty()) {
-            throw new IllegalStateException("Токен Telegram Bot не настроен!");
-        }
-        return "https://api.telegram.org/bot" + token + "/sendMessage";
-    }
-
     /**
      * Отправка сообщения в Telegram-чат.
      */
-    public void sendMessage(Long chatId, String text) {
-        String url = getTelegramApiUrl() + "?chat_id=" + chatId + "&text=" + text;
+    public void sendMessage(Long chatId, String messageText) {
+        // Создаем сообщение
+        SendMessage message = new SendMessage(chatId.toString(), messageText);
 
         try {
-            restTemplate.getForObject(url, String.class);
-            System.out.printf("Сообщение отправлено в чат %d: %s%n", chatId, text);
+            // Отправляем сообщение через execute()
+            SendResponse response = telegramBot.execute(message); // 'bot' — экземпляр вашего TelegramBot
+
+            // Проверяем результат отправки
+            if (response.isOk()) {
+                System.out.printf("Сообщение отправлено в чат %d: %s%n", chatId, messageText);
+            } else {
+                System.err.printf("Ошибка при отправке сообщения в чат %d. Код ошибки: %d%n",
+                        chatId, response.errorCode());
+            }
         } catch (Exception e) {
-            System.err.printf("Ошибка при отправке сообщения в чат %d: %s%n", chatId, e.getMessage());
+            System.err.printf("Исключение при отправке сообщения в чат %d: %s%n", chatId, e.getMessage());
         }
     }
+
 
     /**
      * Отправка уведомления для задачи.
